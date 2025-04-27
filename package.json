@@ -1,0 +1,26 @@
+{
+  "name": "liquicalc",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/liquicalc.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "ts-node liquicalc.ts",
+    "build": "rimraf dist && tsc",
+    "start": "node dist/liquicalc.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/command-line-args": "5.2.1",
+    "@types/node": "^22.15.2",
+    "rimraf": "^6.0.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@binance/futures-connector": "^0.1.7",
+    "command-line-args": "5.2.1"
+  }
+}
