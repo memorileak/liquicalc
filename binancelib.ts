@@ -1,6 +1,21 @@
 // @ts-ignore
 import { UMFutures } from "@binance/futures-connector";
 
+export enum PositionMode {
+  HEDGE_MODE = "true",
+  ONE_WAY_MODE = "false",
+}
+
+export enum MultiAssetsMode {
+  MULTI_ASSETS = "true",
+  SINGLE_ASSET = "false",
+}
+
+export enum MarginType {
+  ISOLATED = "ISOLATED",
+  CROSSED = "CROSSED",
+}
+
 export enum BuySellSide {
   BUY = "BUY",
   SELL = "SELL",
@@ -135,6 +150,49 @@ const client: UMFutures = new UMFutures(
 export async function getExchangeInfo(): Promise<ExchangeInfo> {
   const res = await client.getExchangeInfo();
   return res?.data ?? {};
+}
+
+export async function getMarketPrice(symbol: string): Promise<number> {
+  const res = await client.getPremiumIndex(symbol);
+  return parseFloat(res?.data?.markPrice ?? "0");
+}
+
+export async function prepareTradingEnvironment(
+  symbol: string,
+  leverage: number,
+): Promise<void> {
+  // Position mode: ONE_WAY_MODE
+  try {
+    await client.changePositionMode(PositionMode.ONE_WAY_MODE);
+  } catch (err: any) {
+    // Error code -4059 indicates that the position mode is already set to ONE_WAY_MODE
+    if (err?.response?.data?.code !== -4059) {
+      console.log("Error changing position mode:", err);
+      throw err;
+    }
+  }
+
+  // Multi-assets mode: SINGLE_ASSET
+  try {
+    await client.changeMultiAssetsMode(MultiAssetsMode.SINGLE_ASSET);
+  } catch (err: any) {
+    // Error code -4171 indicates that the multi-assets mode is already set to SINGLE_ASSET
+    if (err?.response?.data?.code !== -4171) {
+      throw err;
+    }
+  }
+
+  // Margin type: ISOLATED
+  try {
+    await client.changeMarginType(symbol, MarginType.ISOLATED);
+  } catch (err: any) {
+    // Error code -4046 indicates that the margin type is already set to ISOLATED
+    if (err?.response?.data?.code !== -4046) {
+      throw err;
+    }
+  }
+
+  await client.changeInitialLeverage(symbol, leverage);
 }
 
 export async function placeMultipleOrders(

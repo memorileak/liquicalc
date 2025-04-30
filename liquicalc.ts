@@ -9,7 +9,9 @@ import {
 } from "./numberlib";
 import {
   getExchangeInfo,
+  prepareTradingEnvironment,
   placeMultipleOrders,
+  getMarketPrice,
   OrderType,
   BuySellSide,
   PositionSide,
@@ -48,7 +50,7 @@ Options:
   -l, --leverage    Leverage ratio (default: 1)
   -d, --deviation   Price deviation percent between orders (default: 5)
   -x, --sizemult    Order size multiplier (default: 1)
-  -e, --entryprice  Entry price (REQUIRED)
+  -e, --entryprice  Entry price (optional, will use current market price if not provided)
   -i, --initmargin  Initial margin (REQUIRED)
   -r, --reload      Reload maintenance margin rates from Binance API
   --apply           Apply calculations to create orders on Binance (default: false)
@@ -117,7 +119,7 @@ async function fetchMaintenanceMarginRates(): Promise<void> {
 
   await writeFile(MAINTENANCE_MARGIN_RATE_FILE_PATH, JSON.stringify(brackets));
   console.log(
-    `Maintenance margin rates saved to ${MAINTENANCE_MARGIN_RATE_FILE_PATH}`,
+    `Maintenance margin rates saved to ${MAINTENANCE_MARGIN_RATE_FILE_PATH}\n`,
   );
 }
 
@@ -254,14 +256,18 @@ async function main() {
 
   const options = commandLineArgs(optionDefinitions);
 
-  if (
-    options.help ||
-    !options.tradepair ||
-    !options.entryprice ||
-    !options.initmargin
-  ) {
+  if (options.help || !options.tradepair || !options.initmargin) {
     console.log(HELP_MSG);
     process.exit(options.help ? 0 : 1);
+  }
+
+  if (
+    !Number.isInteger(options.leverage) ||
+    options.leverage < 1 ||
+    options.leverage > 125
+  ) {
+    console.error("Leverage must be an integer between 1 and 125");
+    return;
   }
 
   // Reload maintenance margin rates from Binance
@@ -287,6 +293,18 @@ async function main() {
     return;
   }
 
+  // Get current market price if entry price wasn't provided
+  let entryPrice = options.entryprice;
+  if (!entryPrice) {
+    try {
+      entryPrice = await getMarketPrice(options.tradepair);
+    } catch (error) {
+      console.error("Failed to fetch current market price:", error);
+      console.log("Please provide an entry price using -e or --entryprice");
+      return;
+    }
+  }
+
   const priceFilter = symbolInfo?.filters.find(
     (filter) => filter.filterType === "PRICE_FILTER",
   );
@@ -304,7 +322,7 @@ async function main() {
     leverage: options.leverage,
     priceDeviationPercent: options.deviation,
     orderSizeMultiplier: options.sizemult,
-    initialEntryPrice: options.entryprice,
+    initialEntryPrice: entryPrice,
     initialMargin: options.initmargin,
   };
 
@@ -414,6 +432,7 @@ async function main() {
     );
 
     try {
+      await prepareTradingEnvironment(options.tradepair, options.leverage);
       const orders = await placeMultipleOrders(orderParamsList);
       console.log("Orders placed successfully:", orders.length);
     } catch (error) {
