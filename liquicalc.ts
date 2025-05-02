@@ -46,7 +46,6 @@ const HELP_MSG = `Usage: node dist/liquicalc.js [OPTIONS]
 
 Options:
   -t, --tradepair   Trading pair symbol (e.g., BTCUSDT) (REQUIRED)
-  -s, --short       Use SHORT mode (default: LONG if not specified)
   -l, --leverage    Leverage ratio (default: 1)
   -d, --deviation   Price deviation percent between orders (default: 5)
   -x, --sizemult    Order size multiplier (default: 1)
@@ -95,6 +94,10 @@ type PositionSnapshot = {
   avgEntryPrice: number;
   liquidationPrice: number;
   totalInvesment: number;
+};
+
+type IndexedPositionSnapshot = PositionSnapshot & {
+  index: number;
 };
 
 async function fetchMaintenanceMarginRates(): Promise<void> {
@@ -240,10 +243,31 @@ async function calculateLiquidationPrices(
   return calculatingResults;
 }
 
+function reverseArray<T>(arr: T[]): T[] {
+  const reversed: T[] = [];
+  for (let i = arr.length - 1; i >= 0; i -= 1) {
+    reversed.push(arr[i]);
+  }
+  return reversed;
+}
+
+function mergeTwoArraysAlternatively<T>(arr1: T[], arr2: T[]): T[] {
+  const result: T[] = [];
+  const maxLength = Math.max(arr1.length, arr2.length);
+  for (let i = 0; i < maxLength; i++) {
+    if (i < arr1.length) {
+      result.push(arr1[i]);
+    }
+    if (i < arr2.length) {
+      result.push(arr2[i]);
+    }
+  }
+  return result;
+}
+
 async function main() {
   const optionDefinitions = [
     { name: "tradepair", alias: "t", type: String },
-    { name: "short", alias: "s", type: Boolean, defaultValue: false },
     { name: "leverage", alias: "l", type: Number, defaultValue: 1 },
     { name: "deviation", alias: "d", type: Number, defaultValue: 5 },
     { name: "sizemult", alias: "x", type: Number, defaultValue: 1 },
@@ -314,24 +338,40 @@ async function main() {
   const pricePrecision = Math.log10(1 / tickSize);
   const quantityPrecision = symbolInfo?.quantityPrecision ?? 0;
 
-  const mode = options.short ? TradingMode.SHORT : TradingMode.LONG;
+  let twoSidesResults: IndexedPositionSnapshot[][] = [];
+  for (const mode of [TradingMode.SHORT, TradingMode.LONG]) {
+    const config = {
+      tradingPair: options.tradepair,
+      mode: mode,
+      leverage: options.leverage,
+      priceDeviationPercent: options.deviation,
+      orderSizeMultiplier: options.sizemult,
+      initialEntryPrice: entryPrice,
+      initialMargin: options.initmargin,
+    };
 
-  const config = {
-    tradingPair: options.tradepair,
-    mode: mode,
-    leverage: options.leverage,
-    priceDeviationPercent: options.deviation,
-    orderSizeMultiplier: options.sizemult,
-    initialEntryPrice: entryPrice,
-    initialMargin: options.initmargin,
-  };
+    const oneSideResults = await calculateLiquidationPrices(config);
 
-  const results = await calculateLiquidationPrices(config);
+    const indexedOneSideResults: IndexedPositionSnapshot[] = oneSideResults.map(
+      (r, i) => ({
+        index: mode === TradingMode.SHORT ? i + 1 : -i - 1,
+        ...r,
+      }),
+    );
+
+    twoSidesResults.push(indexedOneSideResults);
+  }
+
+  const shortResults = twoSidesResults?.[0] ?? [];
+  const longResults = twoSidesResults?.[1] ?? [];
+
+  // The Array.prototype.reverse() method can't be used here because it modifies the original array
+  const results = reverseArray(shortResults).concat(longResults);
 
   // Print results in a pretty table format
   console.table(
-    results.map((result, index) => ({
-      "Order #": index + 1,
+    results.map((result) => ({
+      "Order #": result.index,
       "Entry Price": result.entryPrice.toLocaleString(undefined, {
         minimumFractionDigits: pricePrecision,
         maximumFractionDigits: pricePrecision,
@@ -363,7 +403,7 @@ async function main() {
 
     const orderCount = await new Promise<number>((resolve) => {
       readline.question(
-        "\nHow many orders do you want to place? (default: 5): ",
+        "\nHow many orders ON EACH SIDE do you want to place? (default: 5): ",
         (input: string) => {
           resolve(input ? parseInt(input, 10) : 5);
         },
@@ -376,14 +416,19 @@ async function main() {
       return;
     }
 
-    const resultsForCreatingOrders = results.slice(0, orderCount);
+    const selectedShortResults = shortResults.slice(0, orderCount);
+    const selectedLongResults = longResults.slice(0, orderCount);
+
+    // The Array.prototype.reverse() method can't be used here because it modifies the original array
+    const resultsForPreviewingOrders =
+      reverseArray(selectedShortResults).concat(selectedLongResults);
 
     console.log("\nThese orders are about to be placed:\n");
     console.table(
-      resultsForCreatingOrders.map((result, index) => ({
-        "Order #": index + 1,
-        Mode: options.short ? TradingMode.SHORT : TradingMode.LONG,
-        Side: options.short ? BuySellSide.SELL : BuySellSide.BUY,
+      resultsForPreviewingOrders.map((result) => ({
+        "Order #": result.index,
+        Mode: result.index > 0 ? TradingMode.SHORT : TradingMode.LONG,
+        Side: result.index > 0 ? BuySellSide.SELL : BuySellSide.BUY,
         Type: OrderType.LIMIT,
         Price: result.entryPrice.toLocaleString(undefined, {
           minimumFractionDigits: pricePrecision,
@@ -419,6 +464,11 @@ async function main() {
       return;
     }
 
+    const resultsForCreatingOrders = mergeTwoArraysAlternatively(
+      selectedShortResults,
+      selectedLongResults,
+    );
+
     const orderParamsList: NewOrderParams[] = resultsForCreatingOrders.map(
       (result) => ({
         symbol: options.tradepair,
@@ -426,8 +476,8 @@ async function main() {
         price: round(result.entryPrice, pricePrecision),
         quantity: roundDown(result.orderSizeBase, quantityPrecision),
         timeInForce: "GTC",
-        side: options.short ? BuySellSide.SELL : BuySellSide.BUY,
-        positionSide: PositionSide.BOTH,
+        side: result.index > 0 ? BuySellSide.SELL : BuySellSide.BUY,
+        positionSide: result.index > 0 ? PositionSide.SHORT : PositionSide.LONG,
       }),
     );
 

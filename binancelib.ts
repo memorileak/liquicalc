@@ -161,11 +161,11 @@ export async function prepareTradingEnvironment(
   symbol: string,
   leverage: number,
 ): Promise<void> {
-  // Position mode: ONE_WAY_MODE
+  // Position mode: HEDGE_MODE
   try {
-    await client.changePositionMode(PositionMode.ONE_WAY_MODE);
+    await client.changePositionMode(PositionMode.HEDGE_MODE);
   } catch (err: any) {
-    // Error code -4059 indicates that the position mode is already set to ONE_WAY_MODE
+    // Error code -4059 indicates that the position mode is already set to HEDGE_MODE
     if (err?.response?.data?.code !== -4059) {
       console.log("Error changing position mode:", err);
       throw err;
