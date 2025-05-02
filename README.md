@@ -33,7 +33,6 @@ node dist/liquicalc.js -t BTCUSDT -e 60000 -i 1000
 #### Options:
 
 - `-t, --tradepair`: Trading pair (e.g., BTCUSDT)
-- `-s, --short`: Use short mode (default: false)
 - `-l, --leverage`: Leverage multiplier (default: 1)
 - `-d, --deviation`: Price deviation percentage (default: 5)
 - `-x, --sizemult`: Order size multiplier (default: 1)
@@ -41,19 +40,14 @@ node dist/liquicalc.js -t BTCUSDT -e 60000 -i 1000
 - `-i, --initmargin`: Initial margin amount
 - `-r, --reload`: Force reload of maintenance margin rates
 - `--apply`: Place orders based on calculations (requires confirmation)
+- `-h, --help`: Show help message
 
 ### Examples
 
-Calculate liquidation price for a long position:
+Calculate liquidation prices for both long and short positions:
 
 ```bash
 node dist/liquicalc.js -t BTCUSDT -e 60000 -i 1000 -l 5
-```
-
-Calculate liquidation price for a short position:
-
-```bash
-node dist/liquicalc.js -t BTCUSDT -e 60000 -i 1000 -l 5 -s
 ```
 
 Place orders with confirmation:
@@ -70,11 +64,16 @@ node dist/liquicalc.js -t BTCUSDT -e 60000 -i 1000 -l 5 --apply
 - Interactive confirmation before placing orders
 - Requires explicit "yes" to proceed with order placement
 - Displays order details before confirmation
-- Automatic trading environment configuration (ONE_WAY mode, ISOLATED margin, proper leverage)
+- Automatic trading environment configuration (HEDGE mode, ISOLATED margin, Single Asset mode)
+- Alternating order placement between short and long positions
 
 ## Important Requirements
 
-This tool only works with the assumption position mode is ONE_WAY, margin type is ISOLATED, Single Asset mode is enabled. The tool will automatically set these parameters for you.
+This tool works with the following settings which are automatically configured:
+
+- **HEDGE MODE**: Allows simultaneous long and short positions on the same trading pair
+- **ISOLATED MARGIN**: Each position has its own allocated margin
+- **SINGLE ASSET MODE**: Trading is done with a single asset as collateral
 
 ## License
 
