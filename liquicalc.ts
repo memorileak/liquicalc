@@ -122,7 +122,7 @@ async function fetchMaintenanceMarginRates(): Promise<void> {
 
   await writeFile(MAINTENANCE_MARGIN_RATE_FILE_PATH, JSON.stringify(brackets));
   console.log(
-    `Maintenance margin rates saved to ${MAINTENANCE_MARGIN_RATE_FILE_PATH}\n`,
+    `Maintenance margin rates saved to ${MAINTENANCE_MARGIN_RATE_FILE_PATH}`,
   );
 }
 
@@ -214,7 +214,7 @@ async function calculateLiquidationPrices(
 
     if (!riskBracket) {
       console.error(
-        `No risk bracket found for position notional value: ${positionNotionalValue}. Perhaps the position is too large.\n`,
+        `No risk bracket found for position notional value: ${positionNotionalValue}. Perhaps the position is too large.`,
       );
       break;
     }
@@ -370,6 +370,7 @@ async function main() {
   const results = reverseArray(shortResults).concat(longResults);
 
   // Print results in a pretty table format
+  console.log("");
   console.table(
     results.map((result) => ({
       "Order #": result.index,
