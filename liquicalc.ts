@@ -213,9 +213,10 @@ async function calculateLiquidationPrices(
     );
 
     if (!riskBracket) {
-      throw new Error(
-        `No risk bracket found for position notional value: ${positionNotionalValue}`,
+      console.error(
+        `No risk bracket found for position notional value: ${positionNotionalValue}. Perhaps the position is too large.\n`,
       );
+      break;
     }
 
     const maintenanceMarginRate =
