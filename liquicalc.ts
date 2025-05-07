@@ -48,6 +48,7 @@ Options:
   -t, --tradepair   Trading pair symbol (e.g., BTCUSDT) (REQUIRED)
   -l, --leverage    Leverage ratio (default: 1)
   -d, --deviation   Price deviation percent between orders (default: 5)
+  -p, --dvimult     Price deviation multiplier (default: 1)
   -x, --sizemult    Order size multiplier (default: 1)
   -e, --entryprice  Entry price (optional, will use current market price if not provided)
   -i, --initmargin  Initial margin (REQUIRED)
@@ -82,6 +83,7 @@ type LiquidationPriceConfig = {
   mode: TradingMode;
   leverage: number;
   priceDeviationPercent: number;
+  priceDeviationMultiplier: number;
   orderSizeMultiplier: number;
   initialEntryPrice: number;
   initialMargin: number;
@@ -180,10 +182,14 @@ async function calculateLiquidationPrices(
       averageEntryPrice = initialEntryPrice; // It's totalLeveragedInvestment / positionAssetSize
     } else {
       const previousMarketPrice = marketPrice;
+      // Calculate deviation for this step, applying multiplier for each step
+      const currentDeviation =
+        priceDeviationPercent *
+        Math.pow(config.priceDeviationMultiplier, i - 1);
       marketPrice =
         mode === TradingMode.LONG
-          ? subtractPercentage(marketPrice, priceDeviationPercent)
-          : addPercentage(marketPrice, priceDeviationPercent);
+          ? subtractPercentage(marketPrice, currentDeviation)
+          : addPercentage(marketPrice, currentDeviation);
       const loss =
         mode === TradingMode.LONG
           ? (previousMarketPrice - marketPrice) * positionAssetSize
@@ -196,6 +202,10 @@ async function calculateLiquidationPrices(
       assetSizeToAdd = (leverage * marginToAdd) / marketPrice;
       positionAssetSize = positionAssetSize + assetSizeToAdd;
       averageEntryPrice = totalLeveragedInvestment / positionAssetSize;
+    }
+
+    if (marketPrice <= 0) {
+      break;
     }
 
     if (
@@ -276,6 +286,7 @@ async function main() {
     { name: "tradepair", alias: "t", type: String },
     { name: "leverage", alias: "l", type: Number, defaultValue: 1 },
     { name: "deviation", alias: "d", type: Number, defaultValue: 5 },
+    { name: "dvimult", alias: "p", type: Number, defaultValue: 1 },
     { name: "sizemult", alias: "x", type: Number, defaultValue: 1 },
     { name: "entryprice", alias: "e", type: Number },
     { name: "initmargin", alias: "i", type: Number },
@@ -351,6 +362,7 @@ async function main() {
       mode: mode,
       leverage: options.leverage,
       priceDeviationPercent: options.deviation,
+      priceDeviationMultiplier: options.dvimult,
       orderSizeMultiplier: options.sizemult,
       initialEntryPrice: entryPrice,
       initialMargin: options.initmargin,
