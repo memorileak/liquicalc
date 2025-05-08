@@ -97,6 +97,7 @@ type PositionSnapshot = {
   liquidationPrice: number;
   totalInvesment: number;
   divergence: number; // Difference between entryPrice and avgEntryPrice in %
+  difference: number; // Difference between initialEntryPrice and entryPrice in %
 };
 
 type IndexedPositionSnapshot = PositionSnapshot & {
@@ -242,6 +243,8 @@ async function calculateLiquidationPrices(
         ? averageEntryPrice - (margin - maintenanceMargin) / positionAssetSize
         : averageEntryPrice + (margin - maintenanceMargin) / positionAssetSize;
 
+    const difference =
+      (Math.abs(initialEntryPrice - marketPrice) / initialEntryPrice) * 100;
     const divergence =
       (Math.abs(marketPrice - averageEntryPrice) / marketPrice) * 100;
 
@@ -253,6 +256,7 @@ async function calculateLiquidationPrices(
       liquidationPrice: liquidationPrice,
       totalInvesment: totalActualInvesment,
       divergence: divergence,
+      difference: difference,
     });
   }
 
@@ -394,6 +398,10 @@ async function main() {
       "Order Size": result.orderSizeQuote.toLocaleString(undefined, {
         minimumFractionDigits: pricePrecision,
         maximumFractionDigits: pricePrecision,
+      }),
+      Diff: result.difference.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
       }),
       "Entry Price": result.entryPrice.toLocaleString(undefined, {
         minimumFractionDigits: pricePrecision,
