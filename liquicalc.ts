@@ -142,6 +142,7 @@ async function calculateLiquidationPrices(
     mode,
     leverage,
     priceDeviationPercent,
+    priceDeviationMultiplier,
     orderSizeMultiplier,
     initialEntryPrice,
     initialMargin,
@@ -160,6 +161,7 @@ async function calculateLiquidationPrices(
   }
 
   let marketPrice = 0;
+  let previousMarketPrice = 0;
   let marginToAdd = 0;
   let assetSizeToAdd = 0;
 
@@ -170,10 +172,12 @@ async function calculateLiquidationPrices(
   let totalLeveragedInvestment = 0;
 
   let liquidationPrice = -1;
+  let totalDeviation = 0;
 
   for (let i = 0; i < 20; i += 1) {
     if (i === 0) {
       marketPrice = initialEntryPrice;
+      previousMarketPrice = initialEntryPrice;
       marginToAdd = initialMargin;
       margin = marginToAdd;
       totalActualInvesment = initialMargin;
@@ -182,24 +186,27 @@ async function calculateLiquidationPrices(
       positionAssetSize = assetSizeToAdd;
       averageEntryPrice = initialEntryPrice; // It's totalLeveragedInvestment / positionAssetSize
     } else {
-      const previousMarketPrice = marketPrice;
-      // Calculate deviation for this step, applying multiplier for each step
-      const currentDeviation =
-        priceDeviationPercent *
-        Math.pow(config.priceDeviationMultiplier, i - 1);
-      marketPrice =
-        mode === TradingMode.LONG
-          ? subtractPercentage(marketPrice, currentDeviation)
-          : addPercentage(marketPrice, currentDeviation);
-      const loss =
-        mode === TradingMode.LONG
-          ? (previousMarketPrice - marketPrice) * positionAssetSize
-          : (marketPrice - previousMarketPrice) * positionAssetSize;
+      // Store the previous market price before updating
+      previousMarketPrice = marketPrice;
+
+      const deviationPercentThisRound = priceDeviationPercent * (priceDeviationMultiplier !== 1 ?
+        Math.pow(priceDeviationMultiplier, i - 1) : 1);
+      totalDeviation = totalDeviation + deviationPercentThisRound;
+
+      // Apply the deviation to the initial entry price
+      marketPrice = mode === TradingMode.LONG
+        ? subtractPercentage(initialEntryPrice, totalDeviation)
+        : addPercentage(initialEntryPrice, totalDeviation);
+
+      // Calculate loss based on the price movement from previous to current price
+      const loss = mode === TradingMode.LONG
+        ? (previousMarketPrice - marketPrice) * positionAssetSize
+        : (marketPrice - previousMarketPrice) * positionAssetSize;
+
       marginToAdd = marginToAdd * orderSizeMultiplier;
       margin = margin - loss + marginToAdd;
       totalActualInvesment = totalActualInvesment + marginToAdd;
-      totalLeveragedInvestment =
-        totalLeveragedInvestment + leverage * marginToAdd;
+      totalLeveragedInvestment = totalLeveragedInvestment + leverage * marginToAdd;
       assetSizeToAdd = (leverage * marginToAdd) / marketPrice;
       positionAssetSize = positionAssetSize + assetSizeToAdd;
       averageEntryPrice = totalLeveragedInvestment / positionAssetSize;
@@ -396,8 +403,8 @@ async function main() {
     results.map((result) => ({
       "Order #": result.index,
       "Order Size": result.orderSizeQuote.toLocaleString(undefined, {
-        minimumFractionDigits: pricePrecision,
-        maximumFractionDigits: pricePrecision,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
       }),
       Diff: result.difference.toLocaleString(undefined, {
         minimumFractionDigits: 2,
@@ -420,8 +427,8 @@ async function main() {
         maximumFractionDigits: pricePrecision,
       }),
       "Total Investment": result.totalInvesment.toLocaleString(undefined, {
-        minimumFractionDigits: pricePrecision,
-        maximumFractionDigits: pricePrecision,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
       }),
     })),
   );
@@ -466,8 +473,8 @@ async function main() {
           maximumFractionDigits: pricePrecision,
         }),
         "Order Size": result.orderSizeQuote.toLocaleString(undefined, {
-          minimumFractionDigits: pricePrecision,
-          maximumFractionDigits: pricePrecision,
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
         }),
         Quantity: roundDown(
           result.orderSizeBase,
