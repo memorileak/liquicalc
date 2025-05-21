@@ -174,7 +174,7 @@ async function calculateLiquidationPrices(
   let liquidationPrice = -1;
   let totalDeviation = 0;
 
-  for (let i = 0; i < 20; i += 1) {
+  for (let i = 0; i < 50; i += 1) {
     if (i === 0) {
       marketPrice = initialEntryPrice;
       marginToAdd = initialMargin;
