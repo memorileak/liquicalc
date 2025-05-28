@@ -1,12 +1,6 @@
-import { writeFile, readFile } from "node:fs/promises";
 import commandLineArgs from "command-line-args";
 
-import {
-  addPercentage,
-  subtractPercentage,
-  roundDown,
-  round,
-} from "./numberlib";
+import { roundDown, round } from "./libs/libnumber";
 import {
   getExchangeInfo,
   prepareTradingEnvironment,
@@ -16,7 +10,13 @@ import {
   BuySellSide,
   PositionSide,
   NewOrderParams,
-} from "./binancelib";
+} from "./libs/libbinance";
+import {
+  calculateLiquidationPrices,
+  fetchMaintenanceMarginRates,
+  PositionSnapshot,
+  TradingMode,
+} from "./libs/libliqui";
 
 // Variable references:
 // - Leverage: Leverage ratio used for trading
@@ -40,8 +40,6 @@ import {
 // Calculate MaintenanceMargin:
 // MaintenanceMargin = MarketPrice * PositionAssetSize * MaintenanceMarginRate - MaintenanceAmount;
 
-const MAINTENANCE_MARGIN_RATE_FILE_PATH = `${process.cwd()}/data/maintenance-margin-rates.json`;
-
 const HELP_MSG = `Usage: node dist/liquicalc.js [OPTIONS]
 
 Options:
@@ -56,218 +54,9 @@ Options:
   --apply           Apply calculations to create orders on Binance (default: false)
   -h, --help        Show this help message`;
 
-type RiskBracket = {
-  bracketSeq: number;
-  bracketNotionalFloor: number;
-  bracketNotionalCap: number;
-  bracketMaintenanceMarginRate: number;
-  cumFastMaintenanceAmount: number;
-  minOpenPosLeverage: number;
-  maxOpenPosLeverage: number;
-};
-
-type SymbolRiskBracketInfo = {
-  symbol: string;
-  updateTime: number;
-  notionalLimit: number;
-  riskBrackets: RiskBracket[];
-};
-
-enum TradingMode {
-  LONG = "LONG",
-  SHORT = "SHORT",
-}
-
-type LiquidationPriceConfig = {
-  tradingPair: string;
-  mode: TradingMode;
-  leverage: number;
-  priceDeviationPercent: number;
-  priceDeviationMultiplier: number;
-  orderSizeMultiplier: number;
-  initialEntryPrice: number;
-  initialMargin: number;
-};
-
-type PositionSnapshot = {
-  entryPrice: number;
-  orderSizeQuote: number; // For example: USDT
-  orderSizeBase: number; // For example: BTC
-  avgEntryPrice: number;
-  liquidationPrice: number;
-  totalInvesment: number;
-  divergence: number; // Difference between entryPrice and avgEntryPrice in %
-  difference: number; // Difference between initialEntryPrice and entryPrice in %
-};
-
 type IndexedPositionSnapshot = PositionSnapshot & {
   index: number;
 };
-
-async function fetchMaintenanceMarginRates(): Promise<void> {
-  const response = await fetch(
-    "https://www.binance.com/bapi/futures/v1/friendly/future/common/brackets",
-    {
-      headers: {
-        "content-type": "application/json",
-      },
-      body: "{}",
-      method: "POST",
-    },
-  );
-  const data = await response.json();
-
-  if (!response.ok) {
-    console.error("Failed to fetch maintenance margin rates");
-    return;
-  }
-
-  const brackets = data.data?.brackets ?? [];
-
-  await writeFile(MAINTENANCE_MARGIN_RATE_FILE_PATH, JSON.stringify(brackets));
-  console.log(
-    `Maintenance margin rates saved to ${MAINTENANCE_MARGIN_RATE_FILE_PATH}`,
-  );
-}
-
-async function calculateLiquidationPrices(
-  config: LiquidationPriceConfig,
-): Promise<PositionSnapshot[]> {
-  if (config.mode !== TradingMode.LONG && config.mode !== TradingMode.SHORT) {
-    config.mode = TradingMode.LONG;
-  }
-
-  const {
-    tradingPair,
-    mode,
-    leverage,
-    priceDeviationPercent,
-    priceDeviationMultiplier,
-    orderSizeMultiplier,
-    initialEntryPrice,
-    initialMargin,
-  } = config;
-
-  const calculatingResults: PositionSnapshot[] = [];
-
-  const symbolRiskBracketInfo: SymbolRiskBracketInfo = JSON.parse(
-    await readFile(MAINTENANCE_MARGIN_RATE_FILE_PATH, "utf-8"),
-  ).find((bracket: SymbolRiskBracketInfo) => bracket.symbol === tradingPair);
-
-  if (!symbolRiskBracketInfo) {
-    throw new Error(
-      `No risk bracket info found for trading pair: ${tradingPair}`,
-    );
-  }
-
-  let marketPrice = 0;
-  let marginToAdd = 0;
-  let assetSizeToAdd = 0;
-
-  let margin = 0; // This margin changes through time and will reduce if there is a loss
-  let positionAssetSize = 0;
-  let averageEntryPrice = 0;
-  let totalActualInvesment = 0;
-  let totalLeveragedInvestment = 0;
-
-  let previousMarketPrice = 0;
-  let liquidationPrice = -1;
-  let totalDeviation = 0;
-
-  for (let i = 0; i < 50; i += 1) {
-    if (i === 0) {
-      marketPrice = initialEntryPrice;
-      marginToAdd = initialMargin;
-      margin = marginToAdd;
-      totalActualInvesment = initialMargin;
-      totalLeveragedInvestment = leverage * initialMargin;
-      assetSizeToAdd = (leverage * initialMargin) / initialEntryPrice;
-      positionAssetSize = assetSizeToAdd;
-      averageEntryPrice = initialEntryPrice; // It's totalLeveragedInvestment / positionAssetSize
-    } else {
-      // Store the previous market price before updating
-      previousMarketPrice = marketPrice;
-
-      const deviationPercentThisRound = priceDeviationPercent * (priceDeviationMultiplier !== 1 ?
-        Math.pow(priceDeviationMultiplier, i - 1) : 1);
-      totalDeviation = totalDeviation + deviationPercentThisRound;
-
-      // Apply the deviation to the initial entry price
-      marketPrice = mode === TradingMode.LONG
-        ? subtractPercentage(initialEntryPrice, totalDeviation)
-        : addPercentage(initialEntryPrice, totalDeviation);
-
-      // Calculate loss based on the price movement from previous to current price
-      const loss = mode === TradingMode.LONG
-        ? (previousMarketPrice - marketPrice) * positionAssetSize
-        : (marketPrice - previousMarketPrice) * positionAssetSize;
-
-      marginToAdd = marginToAdd * orderSizeMultiplier;
-      margin = margin - loss + marginToAdd;
-      totalActualInvesment = totalActualInvesment + marginToAdd;
-      totalLeveragedInvestment = totalLeveragedInvestment + leverage * marginToAdd;
-      assetSizeToAdd = (leverage * marginToAdd) / marketPrice;
-      positionAssetSize = positionAssetSize + assetSizeToAdd;
-      averageEntryPrice = totalLeveragedInvestment / positionAssetSize;
-    }
-
-    if (marketPrice <= 0) {
-      break;
-    }
-
-    if (
-      liquidationPrice > 0 &&
-      ((mode === TradingMode.LONG && marketPrice <= liquidationPrice) ||
-        (mode === TradingMode.SHORT && marketPrice >= liquidationPrice))
-    ) {
-      break;
-    }
-
-    const positionNotionalValue = marketPrice * positionAssetSize;
-    const riskBracket = symbolRiskBracketInfo.riskBrackets.find(
-      (bracket: RiskBracket) =>
-        positionNotionalValue >= bracket?.bracketNotionalFloor &&
-        positionNotionalValue < bracket?.bracketNotionalCap,
-    );
-
-    if (!riskBracket) {
-      console.error(
-        `No risk bracket found for position notional value: ${positionNotionalValue}. Perhaps the position is too large.`,
-      );
-      break;
-    }
-
-    const maintenanceMarginRate =
-      riskBracket?.bracketMaintenanceMarginRate ?? 0;
-    const maintenanceAmount = riskBracket?.cumFastMaintenanceAmount ?? 0;
-
-    const maintenanceMargin =
-      positionNotionalValue * maintenanceMarginRate - maintenanceAmount;
-
-    liquidationPrice =
-      mode === TradingMode.LONG
-        ? averageEntryPrice - (margin - maintenanceMargin) / positionAssetSize
-        : averageEntryPrice + (margin - maintenanceMargin) / positionAssetSize;
-
-    const difference =
-      (Math.abs(initialEntryPrice - marketPrice) / initialEntryPrice) * 100;
-    const divergence =
-      (Math.abs(marketPrice - averageEntryPrice) / marketPrice) * 100;
-
-    calculatingResults.push({
-      entryPrice: marketPrice,
-      orderSizeQuote: marginToAdd,
-      orderSizeBase: assetSizeToAdd,
-      avgEntryPrice: averageEntryPrice,
-      liquidationPrice: liquidationPrice,
-      totalInvesment: totalActualInvesment,
-      divergence: divergence,
-      difference: difference,
-    });
-  }
-
-  return calculatingResults;
-}
 
 function reverseArray<T>(arr: T[]): T[] {
   const reversed: T[] = [];
@@ -335,11 +124,11 @@ async function main() {
   }
 
   const symbolInfo = (exchangeInfo?.symbols ?? []).find(
-    (symInfo) => symInfo.symbol === options.tradepair,
+    (symInfo) => symInfo.symbol === options.tradepair
   );
   if (!symbolInfo) {
     console.error(
-      `Trading pair ${options.tradepair} not found in exchange info.`,
+      `Trading pair ${options.tradepair} not found in exchange info.`
     );
     return;
   }
@@ -357,7 +146,7 @@ async function main() {
   }
 
   const priceFilter = symbolInfo?.filters.find(
-    (filter) => filter.filterType === "PRICE_FILTER",
+    (filter) => filter.filterType === "PRICE_FILTER"
   );
   const tickSize = parseFloat(priceFilter?.tickSize ?? "0.1");
 
@@ -384,7 +173,7 @@ async function main() {
       (r, i) => ({
         index: mode === TradingMode.SHORT ? i + 1 : -i - 1,
         ...r,
-      }),
+      })
     );
 
     twoSidesResults.push(indexedOneSideResults);
@@ -429,7 +218,7 @@ async function main() {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       }),
-    })),
+    }))
   );
 
   if (options.apply) {
@@ -443,7 +232,7 @@ async function main() {
         "\nHow many orders ON EACH SIDE do you want to place? (default: 5): ",
         (input: string) => {
           resolve(input ? parseInt(input, 10) : 5);
-        },
+        }
       );
     });
 
@@ -477,12 +266,12 @@ async function main() {
         }),
         Quantity: roundDown(
           result.orderSizeBase,
-          quantityPrecision,
+          quantityPrecision
         ).toLocaleString(undefined, {
           minimumFractionDigits: quantityPrecision,
           maximumFractionDigits: quantityPrecision,
         }),
-      })),
+      }))
     );
 
     const answer = await new Promise<string>((resolve) => {
@@ -490,7 +279,7 @@ async function main() {
         '\nAre you sure you want to place those orders? Type "yes" to confirm: ',
         (input: string) => {
           resolve(input);
-        },
+        }
       );
     });
 
@@ -503,7 +292,7 @@ async function main() {
 
     const resultsForCreatingOrders = mergeTwoArraysAlternatively(
       selectedShortResults,
-      selectedLongResults,
+      selectedLongResults
     );
 
     const orderParamsList: NewOrderParams[] = resultsForCreatingOrders.map(
@@ -515,7 +304,7 @@ async function main() {
         timeInForce: "GTC",
         side: result.index > 0 ? BuySellSide.SELL : BuySellSide.BUY,
         positionSide: result.index > 0 ? PositionSide.SHORT : PositionSide.LONG,
-      }),
+      })
     );
 
     try {

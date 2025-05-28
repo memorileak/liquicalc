@@ -1,6 +1,24 @@
 // @ts-ignore
 import { UMFutures } from "@binance/futures-connector";
 
+export enum KlineInterval {
+  _1m = '1m',
+  _3m = '3m',
+  _5m = '5m',
+  _15m = '15m',
+  _30m = '30m',
+  _1h = '1h',
+  _2h = '2h',
+  _4h = '4h',
+  _6h = '6h',
+  _8h = '8h',
+  _12h = '12h',
+  _1d = '1d',
+  _3d = '3d',
+  _1w = '1w',
+  _1M = '1M',
+};
+
 export enum PositionMode {
   HEDGE_MODE = "true",
   ONE_WAY_MODE = "false",
@@ -144,7 +162,7 @@ export type ExchangeInfo = {
 const { BINANCE_API_KEY, BINANCE_API_SECRET } = process.env;
 const client: UMFutures = new UMFutures(
   BINANCE_API_KEY || "",
-  BINANCE_API_SECRET || "",
+  BINANCE_API_SECRET || ""
 );
 
 export async function getExchangeInfo(): Promise<ExchangeInfo> {
@@ -157,9 +175,21 @@ export async function getMarketPrice(symbol: string): Promise<number> {
   return parseFloat(res?.data?.markPrice ?? "0");
 }
 
+export async function getKlines(cfg: {
+  symbol: string;
+  interval: KlineInterval;
+  startTime?: number;
+  endTime?: number;
+  limit?: number;
+}): Promise<any[]> {
+  const { symbol, interval, startTime, endTime, limit = 1000 } = cfg;
+  const res = await client.getKlines(symbol, interval, startTime, endTime, limit);
+  return res?.data ?? [];
+}
+
 export async function prepareTradingEnvironment(
   symbol: string,
-  leverage: number,
+  leverage: number
 ): Promise<void> {
   // Position mode: HEDGE_MODE
   try {
@@ -196,7 +226,7 @@ export async function prepareTradingEnvironment(
 }
 
 export async function placeMultipleOrders(
-  orderParamsList: NewOrderParams[],
+  orderParamsList: NewOrderParams[]
 ): Promise<Order[]> {
   if (!Array.isArray(orderParamsList) || orderParamsList.length === 0) {
     throw new Error("No order parameters provided");
@@ -209,7 +239,7 @@ export async function placeMultipleOrders(
     const batch = orderParamsList.slice(i, i + BATCH_SIZE);
 
     const orderParamsPayload = JSON.stringify(
-      batch.map((op) => serializePayloadValues(op)),
+      batch.map((op) => serializePayloadValues(op))
     );
 
     const res = await client.placeMultipleOrders(orderParamsPayload);
@@ -223,7 +253,9 @@ export async function placeMultipleOrders(
     } else {
       throw new Error(
         `Placing multiple orders failure in batch ${i / BATCH_SIZE + 1}.` +
-          ` Response:\n${res?.data ? JSON.stringify(res?.data, null, 2) : res?.data}`,
+          ` Response:\n${
+            res?.data ? JSON.stringify(res?.data, null, 2) : res?.data
+          }`
       );
     }
   }
@@ -232,7 +264,7 @@ export async function placeMultipleOrders(
 }
 
 function serializePayloadValues(
-  payload: Record<string, any>,
+  payload: Record<string, any>
 ): Record<string, any> {
   const result: Record<string, any> = {};
   for (const [key, value] of Object.entries(payload)) {
@@ -243,8 +275,8 @@ function serializePayloadValues(
         typeof item === "object"
           ? serializePayloadValues(item)
           : typeof item === "number" || typeof item === "boolean"
-            ? item.toString()
-            : item,
+          ? item.toString()
+          : item
       );
     } else if (typeof value === "object" && value !== null) {
       result[key] = serializePayloadValues(value);
