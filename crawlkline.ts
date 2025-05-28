@@ -64,6 +64,7 @@ async function crawlKlineData(
           symbol,
           interval,
           startTime: currentStartTime,
+          endTime,
           limit: BATCH_SIZE,
         });
 
