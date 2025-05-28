@@ -21,6 +21,8 @@
   },
   "dependencies": {
     "@binance/futures-connector": "^0.1.7",
-    "command-line-args": "5.2.1"
+    "command-line-args": "5.2.1",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7"
   }
 }
