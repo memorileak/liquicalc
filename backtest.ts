@@ -364,6 +364,7 @@ async function main() {
         defaultValue: KlineInterval._1h,
       },
       { name: "initmargin", alias: "m", type: Number, defaultValue: 12 },
+      { name: "fromdate", alias: "f", type: String },
       { name: "help", alias: "h", type: Boolean, defaultValue: false },
     ];
 
@@ -409,14 +410,18 @@ async function main() {
 
     let klines: Kline[] = [];
     try {
+      const startTime = options.fromdate
+        ? new Date(options.fromdate).getTime()
+        : 0;
       const dbPath = `${KLINE_DB_DIR}/${options.tradepair}_${options.interval}.db`;
-      console.log(`Opening database at ${dbPath}`);
       const db = await open({
         filename: dbPath,
         driver: sqlite3.Database,
       });
+      // Update this query to get klines from startTime
       const rows = await db.all(
-        `SELECT time, open, high, low, close FROM klines ORDER BY time ASC`
+        `SELECT time, open, high, low, close FROM klines WHERE time >= ? ORDER BY time ASC`,
+        startTime
       );
       klines = rows.map(
         ({ time, open, high, low, close }) =>
