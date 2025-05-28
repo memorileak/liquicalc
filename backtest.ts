@@ -1,3 +1,5 @@
+import sqlite3 from "sqlite3";
+import { open } from "sqlite";
 import commandLineArgs from "command-line-args";
 
 import {
@@ -29,12 +31,15 @@ import {
 //   --apply           Apply calculations to create orders on Binance (default: false)
 //   -h, --help        Show this help message`;
 
+const KLINE_DB_DIR = `${process.cwd()}/data`;
 const HELP_MSG = `HELP_MSG`;
 
 type PositionSnapshotWithTP = PositionSnapshot & {
   index: number; // Positive for short positions, negative for long positions
   takeProfitPrice: number;
 };
+
+type Kline = [number, number, number, number, number]; // [time, open, high, low, close]
 
 type BacktestConfig = Omit<
   LiquidationPriceConfig,
@@ -43,7 +48,7 @@ type BacktestConfig = Omit<
   maxOrdersPerSide: number;
   takeProfitPercent: number;
   stopLossPercent: number;
-  klines: Array<[number, string, string, string, string]>; // [time, open, high, low, close]
+  klines: Kline[];
   pricePrecision: number;
 };
 
@@ -120,7 +125,7 @@ async function backtest(
   const { klines, pricePrecision, ...liquiConfig } = backtestConfig;
   let state = 0;
 
-  let initialEntryPrice = parseFloat(klines?.[0]?.[1]) ?? null;
+  let initialEntryPrice = klines?.[0]?.[1] ?? null;
   if (!initialEntryPrice) {
     console.error("Failed to get entry price from klines data");
     return [];
@@ -146,11 +151,7 @@ async function backtest(
 
   // Loop through klines
   for (const kline of backtestConfig.klines ?? []) {
-    const [time, openStr, highStr, lowStr, closeStr] = kline;
-    const open = parseFloat(openStr);
-    const high = parseFloat(highStr);
-    const low = parseFloat(lowStr);
-    const close = parseFloat(closeStr);
+    const [time, open, high, low, close] = kline;
     const isGreen = close >= open;
     const priceMovement = isGreen
       ? [open, low, high, close]
@@ -406,21 +407,25 @@ async function main() {
       return;
     }
 
-    let klines = [];
+    let klines: Kline[] = [];
     try {
-      klines = await getKlines({
-        symbol: options.tradepair,
-        interval: options.interval,
-        limit: 1000,
+      const dbPath = `${KLINE_DB_DIR}/${options.tradepair}_${options.interval}.db`;
+      console.log(`Opening database at ${dbPath}`);
+      const db = await open({
+        filename: dbPath,
+        driver: sqlite3.Database,
       });
+      const rows = await db.all(
+        `SELECT time, open, high, low, close FROM klines ORDER BY time ASC`
+      );
+      klines = rows.map(
+        ({ time, open, high, low, close }) =>
+          [time, open, high, low, close] as Kline
+      );
+      console.log(`Retrieved ${klines.length} klines from database`);
+      await db.close();
     } catch (error) {
       console.error("Error getting klines:", error);
-      return;
-    }
-
-    let entryPrice = parseFloat(klines?.[0]?.[1]) ?? null;
-    if (!entryPrice) {
-      console.error("Failed to get entry price from klines data");
       return;
     }
 
